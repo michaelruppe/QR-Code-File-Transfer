@@ -16,6 +16,7 @@ function showPanel(mode) {
 const CHUNK_RAW_SIZE = 800;
 let chunks = [];
 let fileId = '';
+let fileName = '';
 let totalFrames = 0;
 let currentFrame = 0;
 let playing = false;
@@ -42,8 +43,9 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
 
-  // Generate short file ID (hash of name + size)
+  // Generate short file ID (hash of name + size) and store filename
   fileId = simpleHash(file.name + file.size);
+  fileName = file.name;
 
   // Chunk into base64 pieces
   chunks = [];
@@ -87,7 +89,7 @@ const QrCode = qrcodegen.QrCode;
 const Ecc = QrCode.Ecc;
 
 function renderFrame(index) {
-  const payload = `${index}/${totalFrames}|${fileId}|${chunks[index]}`;
+  const payload = `${index}/${totalFrames}|${fileId}|${fileName}|${chunks[index]}`;
   const canvas = document.getElementById('qr-canvas');
   const ctx = canvas.getContext('2d');
 
@@ -161,6 +163,7 @@ let scanner = null;
 let receivedChunks = {};  // index -> base64 string
 let recvTotalFrames = 0;
 let recvFileId = '';
+let recvFileName = '';
 
 QrScanner.WORKER_PATH = 'qr-scanner-worker.min.js';
 
@@ -186,14 +189,16 @@ function startReceiver() {
 }
 
 function handleScan(data) {
-  // Parse protocol: INDEX/TOTAL|FILE_ID|BASE64_CHUNK
+  // Parse protocol: INDEX/TOTAL|FILE_ID|FILENAME|BASE64_CHUNK
   const pipeIdx1 = data.indexOf('|');
   const pipeIdx2 = data.indexOf('|', pipeIdx1 + 1);
-  if (pipeIdx1 === -1 || pipeIdx2 === -1) return;
+  const pipeIdx3 = data.indexOf('|', pipeIdx2 + 1);
+  if (pipeIdx1 === -1 || pipeIdx2 === -1 || pipeIdx3 === -1) return;
 
   const header = data.slice(0, pipeIdx1);
   const scannedFileId = data.slice(pipeIdx1 + 1, pipeIdx2);
-  const chunk = data.slice(pipeIdx2 + 1);
+  const scannedFileName = data.slice(pipeIdx2 + 1, pipeIdx3);
+  const chunk = data.slice(pipeIdx3 + 1);
 
   const slashIdx = header.indexOf('/');
   if (slashIdx === -1) return;
@@ -208,6 +213,7 @@ function handleScan(data) {
   }
 
   recvFileId = scannedFileId;
+  recvFileName = scannedFileName;
   recvTotalFrames = totalFrames;
 
   if (!receivedChunks.hasOwnProperty(frameIndex)) {
@@ -242,6 +248,7 @@ function stopReceiver() {
   receivedChunks = {};
   recvTotalFrames = 0;
   recvFileId = '';
+  recvFileName = '';
   document.getElementById('download-btn').style.display = 'none';
 }
 
@@ -263,7 +270,7 @@ function downloadFile() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'received_file';
+  a.download = recvFileName || 'received_file';
   a.click();
   URL.revokeObjectURL(url);
 }
