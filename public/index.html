@@ -145,6 +145,15 @@
 
     .controls input[type="range"] { width: 80px; }
 
+    .controls select {
+      padding: 0.3rem 0.5rem;
+      border: 1px solid #334155;
+      border-radius: 0.375rem;
+      background: #1e293b;
+      color: #e2e8f0;
+      font-size: 0.85rem;
+    }
+
     /* Progress bar */
     .progress-wrap {
       width: 100%;
@@ -205,6 +214,16 @@
   <!-- Sender panel -->
   <div id="sender-panel">
     <button class="back-btn" onclick="showPanel(null)">&larr; Back</button>
+    <div class="controls" style="margin-bottom: 1rem;">
+      <label>QR density:
+        <select id="density-select">
+          <option value="100">Low (easy to scan)</option>
+          <option value="250">Medium</option>
+          <option value="500">High</option>
+          <option value="800">Max (good cameras only)</option>
+        </select>
+      </label>
+    </div>
     <label id="file-input-label" for="file-input">
       Click to choose a file
     </label>

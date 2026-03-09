@@ -13,7 +13,6 @@ function showPanel(mode) {
 
 // ── Sender state ───────────────────────────────────────────────
 
-const CHUNK_RAW_SIZE = 800;
 let chunks = [];
 let fileId = '';
 let fileName = '';
@@ -47,10 +46,11 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   fileId = simpleHash(file.name + file.size);
   fileName = file.name;
 
-  // Chunk into base64 pieces
+  // Chunk into base64 pieces based on selected density
+  const chunkRawSize = parseInt(document.getElementById('density-select').value, 10);
   chunks = [];
-  for (let offset = 0; offset < bytes.length; offset += CHUNK_RAW_SIZE) {
-    const slice = bytes.subarray(offset, offset + CHUNK_RAW_SIZE);
+  for (let offset = 0; offset < bytes.length; offset += chunkRawSize) {
+    const slice = bytes.subarray(offset, offset + chunkRawSize);
     chunks.push(uint8ToBase64(slice));
   }
   totalFrames = chunks.length;
