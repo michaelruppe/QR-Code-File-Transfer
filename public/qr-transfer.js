@@ -20,6 +20,9 @@ let totalFrames = 0;
 let currentFrame = 0;
 let playing = false;
 let intervalId = null;
+let playlist = [];          // indices of frames still to send
+let senderCameraStream = null;
+let senderScanId = null;
 
 function getFps() {
   return parseInt(document.getElementById('speed-slider').value, 10);
@@ -54,6 +57,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     chunks.push(uint8ToBase64(slice));
   }
   totalFrames = chunks.length;
+  playlist = Array.from({ length: totalFrames }, (_, i) => i);
   currentFrame = 0;
 
   document.getElementById('file-info').textContent =
@@ -61,6 +65,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
   document.getElementById('qr-display').style.display = 'flex';
 
   startPlaying();
+  startSenderCamera();
 });
 
 function simpleHash(str) {
@@ -119,24 +124,28 @@ function renderFrame(index) {
     }
   }
 
+  const acked = totalFrames - playlist.length;
   document.getElementById('frame-status').textContent =
-    `Frame ${index + 1} / ${totalFrames}`;
+    `Frame ${index + 1} / ${totalFrames} (${playlist.length} remaining)`;
   document.getElementById('send-progress').style.width =
-    ((index + 1) / totalFrames * 100) + '%';
+    (acked / totalFrames * 100) + '%';
 }
 
 // ── Playback controls ──────────────────────────────────────────
 
 function startPlaying() {
+  if (playlist.length === 0) return;
   playing = true;
   document.getElementById('pause-btn').textContent = 'Pause';
-  renderFrame(currentFrame);
+  currentFrame = 0;
+  renderFrame(playlist[currentFrame]);
   intervalId = setInterval(advanceFrame, 1000 / getFps());
 }
 
 function advanceFrame() {
-  currentFrame = (currentFrame + 1) % totalFrames;
-  renderFrame(currentFrame);
+  if (playlist.length === 0) return;
+  currentFrame = (currentFrame + 1) % playlist.length;
+  renderFrame(playlist[currentFrame]);
 }
 
 function togglePause() {
@@ -155,34 +164,119 @@ function stopSender() {
   chunks = [];
   totalFrames = 0;
   currentFrame = 0;
+  playlist = [];
+  stopSenderCamera();
+}
+
+// ── Sender: ACK scanner (camera) ───────────────────────────────
+
+function startSenderCamera() {
+  const video = document.getElementById('sender-camera');
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }
+  }).then((stream) => {
+    senderCameraStream = stream;
+    video.srcObject = stream;
+    video.play();
+    document.getElementById('sender-ack-status').textContent = 'ACK: listening…';
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    senderScanId = setInterval(() => {
+      if (video.readyState < video.HAVE_ENOUGH_DATA) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.data) handleAckScan(code.data);
+    }, 150);
+  }).catch((err) => {
+    document.getElementById('sender-ack-status').textContent = 'ACK: no camera (' + err + ')';
+  });
+}
+
+function handleAckScan(data) {
+  // Parse: ACK|FILE_ID|FRAME_INDEX
+  if (!data.startsWith('ACK|')) return;
+  const parts = data.split('|');
+  if (parts.length !== 3) return;
+  const ackFileId = parts[1];
+  const ackIndex = parseInt(parts[2], 10);
+  if (ackFileId !== fileId || isNaN(ackIndex)) return;
+
+  // Remove ACK'd frame from playlist
+  const pos = playlist.indexOf(ackIndex);
+  if (pos !== -1) {
+    playlist.splice(pos, 1);
+    // Adjust currentFrame pointer if needed
+    if (currentFrame >= playlist.length) currentFrame = 0;
+
+    const acked = totalFrames - playlist.length;
+    document.getElementById('sender-ack-status').textContent =
+      `ACK: ${acked} / ${totalFrames} confirmed`;
+    document.getElementById('send-progress').style.width =
+      (acked / totalFrames * 100) + '%';
+
+    if (playlist.length === 0) {
+      clearInterval(intervalId);
+      playing = false;
+      document.getElementById('frame-status').textContent = 'All frames ACK\'d!';
+      stopSenderCamera();
+    }
+  }
+}
+
+function stopSenderCamera() {
+  if (senderScanId) {
+    clearInterval(senderScanId);
+    senderScanId = null;
+  }
+  if (senderCameraStream) {
+    senderCameraStream.getTracks().forEach(t => t.stop());
+    senderCameraStream = null;
+  }
 }
 
 // ── Receiver ───────────────────────────────────────────────────
 
-let scanner = null;
+let cameraStream = null;
+let scanIntervalId = null;
 let receivedChunks = {};  // index -> base64 string
 let recvTotalFrames = 0;
 let recvFileId = '';
 let recvFileName = '';
 
-QrScanner.WORKER_PATH = 'qr-scanner-worker.min.js';
-
 function startReceiver() {
   receivedChunks = {};
   recvTotalFrames = 0;
   recvFileId = '';
+  recvFileName = '';
   updateReceiverUI();
 
   const video = document.getElementById('camera-view');
-  scanner = new QrScanner(video, (result) => {
-    const data = typeof result === 'string' ? result : result.data;
-    handleScan(data);
-  }, {
-    highlightScanRegion: true,
-    highlightCodeOutline: true,
-  });
-  scanner.start().then(() => {
+  navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+  }).then((stream) => {
+    cameraStream = stream;
+    video.srcObject = stream;
+    video.play();
     document.getElementById('receiver-status').textContent = 'Scanning…';
+
+    // Create offscreen canvas for frame capture
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    scanIntervalId = setInterval(() => {
+      if (video.readyState < video.HAVE_ENOUGH_DATA) return;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, canvas.width, canvas.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.data) handleScan(code.data);
+    }, 80); // ~12 scans per second
   }).catch((err) => {
     document.getElementById('receiver-status').textContent = 'Camera error: ' + err;
   });
@@ -218,13 +312,15 @@ function handleScan(data) {
 
   if (!receivedChunks.hasOwnProperty(frameIndex)) {
     receivedChunks[frameIndex] = chunk;
+    renderAckQR(scannedFileId, frameIndex);
     updateReceiverUI();
   }
 
   // Check if complete
   const received = Object.keys(receivedChunks).length;
   if (received === recvTotalFrames) {
-    scanner.stop();
+    clearInterval(scanIntervalId);
+    scanIntervalId = null;
     document.getElementById('receiver-status').textContent = 'Transfer complete!';
     document.getElementById('download-btn').style.display = 'block';
   }
@@ -239,11 +335,42 @@ function updateReceiverUI() {
   document.getElementById('recv-progress').style.width = (received / total * 100) + '%';
 }
 
+function renderAckQR(ackFileId, frameIndex) {
+  const payload = `ACK|${ackFileId}|${frameIndex}`;
+  const canvas = document.getElementById('ack-qr-canvas');
+  const ctx = canvas.getContext('2d');
+  const qr = QrCode.encodeText(payload, Ecc.LOW);
+  const size = qr.size;
+  const border = 2;
+  const canvasPx = 150;
+
+  canvas.width = canvasPx;
+  canvas.height = canvasPx;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvasPx, canvasPx);
+
+  const scale = Math.floor(canvasPx / (size + border * 2));
+  const offset = Math.floor((canvasPx - (size + border * 2) * scale) / 2);
+
+  ctx.fillStyle = '#000000';
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (qr.getModule(x, y)) {
+        ctx.fillRect(offset + (x + border) * scale, offset + (y + border) * scale, scale, scale);
+      }
+    }
+  }
+}
+
 function stopReceiver() {
-  if (scanner) {
-    scanner.stop();
-    scanner.destroy();
-    scanner = null;
+  if (scanIntervalId) {
+    clearInterval(scanIntervalId);
+    scanIntervalId = null;
+  }
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
   }
   receivedChunks = {};
   recvTotalFrames = 0;

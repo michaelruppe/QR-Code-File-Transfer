@@ -173,14 +173,15 @@
     }
 
     /* Receiver: video */
-    #camera-view {
+    #camera-view, #sender-camera {
       width: 100%;
       max-width: 400px;
       border-radius: 0.5rem;
       background: #000;
+      transform: scaleX(-1);
     }
 
-    #receiver-status {
+    #receiver-status, #sender-ack-status {
       margin-top: 0.75rem;
       font-size: 0.85rem;
       color: #94a3b8;
@@ -199,6 +200,28 @@
     }
 
     #download-btn:hover { background: #16a34a; }
+
+    /* Duplex layout helpers */
+    .duplex-row {
+      display: flex;
+      gap: 1rem;
+      align-items: flex-start;
+      width: 100%;
+      margin-top: 1rem;
+    }
+
+    .duplex-row > * { flex: 1; min-width: 0; }
+
+    #ack-qr-canvas {
+      background: #fff;
+      border-radius: 0.5rem;
+      width: 100%;
+      max-width: 150px;
+    }
+
+    #sender-camera {
+      max-width: 200px;
+    }
   </style>
 </head>
 <body>
@@ -239,6 +262,8 @@
         <label>Speed: <input type="range" id="speed-slider" min="1" max="6" value="3"></label>
         <span id="speed-label">3 fps</span>
       </div>
+      <div id="sender-ack-status">ACK: not connected</div>
+      <video id="sender-camera" autoplay playsinline></video>
     </div>
   </div>
 
@@ -248,11 +273,12 @@
     <video id="camera-view" autoplay playsinline></video>
     <div id="receiver-status">Waiting for camera…</div>
     <div class="progress-wrap"><div class="progress-bar" id="recv-progress"></div></div>
+    <canvas id="ack-qr-canvas" width="150" height="150"></canvas>
     <div id="download-btn" onclick="downloadFile()">Download file</div>
   </div>
 
   <script src="qrcodegen.js"></script>
-  <script src="qr-scanner.umd.min.js"></script>
+  <script src="jsQR.js"></script>
   <script src="qr-transfer.js"></script>
 </body>
 </html>
