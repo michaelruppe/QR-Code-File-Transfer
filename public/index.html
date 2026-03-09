@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR File Transfer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      margin: 2rem 0 0.5rem;
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 0.9rem;
+      margin-bottom: 2rem;
+    }
+
+    /* Mode selection */
+    #mode-select {
+      display: flex;
+      gap: 1rem;
+    }
+
+    #mode-select button {
+      padding: 1rem 2.5rem;
+      font-size: 1.1rem;
+      border: 2px solid #334155;
+      border-radius: 0.75rem;
+      background: #1e293b;
+      color: #e2e8f0;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    #mode-select button:hover {
+      border-color: #60a5fa;
+      background: #1e3a5f;
+    }
+
+    /* Panels */
+    #sender-panel, #receiver-panel {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 500px;
+      padding: 0 1rem;
+    }
+
+    .back-btn {
+      align-self: flex-start;
+      background: none;
+      border: none;
+      color: #60a5fa;
+      cursor: pointer;
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+    }
+
+    .back-btn:hover { text-decoration: underline; }
+
+    /* Sender: file input */
+    #file-input-label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 120px;
+      border: 2px dashed #334155;
+      border-radius: 0.75rem;
+      cursor: pointer;
+      color: #94a3b8;
+      font-size: 1rem;
+      transition: border-color 0.15s;
+    }
+
+    #file-input-label:hover { border-color: #60a5fa; }
+
+    #file-input { display: none; }
+
+    #file-info {
+      margin-top: 1rem;
+      font-size: 0.9rem;
+      color: #94a3b8;
+    }
+
+    /* QR display area */
+    #qr-display {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      margin-top: 1rem;
+      width: 100%;
+    }
+
+    #qr-canvas {
+      background: #fff;
+      border-radius: 0.5rem;
+    }
+
+    #frame-status {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .controls button {
+      padding: 0.5rem 1.25rem;
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      background: #1e293b;
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    .controls button:hover { border-color: #60a5fa; }
+
+    .controls label {
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    .controls input[type="range"] { width: 80px; }
+
+    /* Progress bar */
+    .progress-wrap {
+      width: 100%;
+      height: 8px;
+      background: #1e293b;
+      border-radius: 4px;
+      margin-top: 1rem;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #60a5fa;
+      transition: width 0.2s;
+      border-radius: 4px;
+    }
+
+    /* Receiver: video */
+    #camera-view {
+      width: 100%;
+      max-width: 400px;
+      border-radius: 0.5rem;
+      background: #000;
+    }
+
+    #receiver-status {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    #download-btn {
+      display: none;
+      margin-top: 1rem;
+      padding: 0.75rem 2rem;
+      border: none;
+      border-radius: 0.5rem;
+      background: #22c55e;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+
+    #download-btn:hover { background: #16a34a; }
+  </style>
+</head>
+<body>
+  <h1>QR File Transfer</h1>
+  <p class="subtitle">Transfer files between devices using QR codes — no internet needed</p>
+
+  <!-- Mode selection -->
+  <div id="mode-select">
+    <button onclick="showPanel('sender')">Send</button>
+    <button onclick="showPanel('receiver')">Receive</button>
+  </div>
+
+  <!-- Sender panel -->
+  <div id="sender-panel">
+    <button class="back-btn" onclick="showPanel(null)">&larr; Back</button>
+    <label id="file-input-label" for="file-input">
+      Click to choose a file
+    </label>
+    <input type="file" id="file-input">
+    <div id="file-info"></div>
+
+    <div id="qr-display">
+      <canvas id="qr-canvas" width="300" height="300"></canvas>
+      <div id="frame-status">Frame 0 / 0</div>
+      <div class="progress-wrap"><div class="progress-bar" id="send-progress"></div></div>
+      <div class="controls">
+        <button id="pause-btn" onclick="togglePause()">Pause</button>
+        <label>Speed: <input type="range" id="speed-slider" min="1" max="6" value="3"></label>
+        <span id="speed-label">3 fps</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Receiver panel -->
+  <div id="receiver-panel">
+    <button class="back-btn" onclick="showPanel(null)">&larr; Back</button>
+    <video id="camera-view" autoplay playsinline></video>
+    <div id="receiver-status">Waiting for camera…</div>
+    <div class="progress-wrap"><div class="progress-bar" id="recv-progress"></div></div>
+    <div id="download-btn" onclick="downloadFile()">Download file</div>
+  </div>
+
+  <script src="qrcodegen.js"></script>
+  <script src="qr-scanner.umd.min.js"></script>
+  <script src="qr-transfer.js"></script>
+</body>
+</html>
